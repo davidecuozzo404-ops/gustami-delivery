@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,24 +13,57 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Gustami Delivery",
-  description: "Delivery tracking platform",
+  description: "Piattaforma delivery indipendente Gustami",
   manifest: "/manifest.json",
+  applicationName: "Gustami Delivery",
+  appleWebApp: {
+    capable: true,
+    title: "Gustami",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/favicon.ico",
+  },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#00c853",
+  width: "device-width",
+  initialScale: 1,
+};
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="it">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+
+        <Script id="register-service-worker" strategy="afterInteractive">
+          {`
+            if ("serviceWorker" in navigator) {
+              window.addEventListener("load", function () {
+                navigator.serviceWorker
+                  .register("/sw.js")
+                  .then(function () {
+                    console.log("Service Worker registrato");
+                  })
+                  .catch(function (error) {
+                    console.log("Errore Service Worker:", error);
+                  });
+              });
+            }
+          `}
+        </Script>
+      </body>
     </html>
   );
 }
