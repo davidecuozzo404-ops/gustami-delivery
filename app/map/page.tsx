@@ -65,7 +65,8 @@ export default function MapPage() {
   return (
     <main className="min-h-screen">
       <MapContainer
-        center={position}
+  center={position as [number, number]}
+  zoom={15}
         zoom={15}
         style={{
           height: "100vh",
