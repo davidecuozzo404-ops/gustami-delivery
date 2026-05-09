@@ -1,0 +1,17 @@
+{
+    "name": "Gustami Delivery",
+    "short_name": "Gustami",
+    "description": "Piattaforma delivery indipendente Gustami",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#000000",
+    "theme_color": "#00c853",
+    "orientation": "portrait",
+    "icons": [
+      {
+        "src": "/favicon.ico",
+        "sizes": "64x64",
+        "type": "image/x-icon"
+      }
+    ]
+  }
