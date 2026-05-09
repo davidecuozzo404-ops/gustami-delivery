@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import dynamic from "next/dynamic";
-
 import "leaflet/dist/leaflet.css";
 
 const supabase = createClient(
@@ -11,20 +10,20 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const MapContainer = dynamic(
-  () => import("react-leaflet").then((m) => m.MapContainer),
+const Map = dynamic(
+  () => import("react-leaflet").then((mod) => mod.MapContainer),
   { ssr: false }
-);
+) as any;
 
-const TileLayer = dynamic(
-  () => import("react-leaflet").then((m) => m.TileLayer),
+const Tile = dynamic(
+  () => import("react-leaflet").then((mod) => mod.TileLayer),
   { ssr: false }
-);
+) as any;
 
 const Marker = dynamic(
-  () => import("react-leaflet").then((m) => m.Marker),
+  () => import("react-leaflet").then((mod) => mod.Marker),
   { ssr: false }
-);
+) as any;
 
 type DriverLocation = {
   id: number;
@@ -35,9 +34,7 @@ type DriverLocation = {
 };
 
 export default function TrackingPage() {
-  const [position, setPosition] = useState<[number, number] | null>(
-    null
-  );
+  const [position, setPosition] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     loadLastLocation();
@@ -53,7 +50,6 @@ export default function TrackingPage() {
         },
         (payload) => {
           const location = payload.new as DriverLocation;
-
           setPosition([location.lat, location.lng]);
         }
       )
@@ -97,7 +93,7 @@ export default function TrackingPage() {
         <p className="text-zinc-400">Posizione aggiornata live</p>
       </div>
 
-      <MapContainer
+      <Map
         center={position}
         zoom={15}
         style={{
@@ -105,13 +101,13 @@ export default function TrackingPage() {
           width: "100%",
         }}
       >
-        <TileLayer
-          attribution='&copy; OpenStreetMap'
+        <Tile
+          attribution='&copy; OpenStreetMap contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
         <Marker position={position} />
-      </MapContainer>
+      </Map>
     </main>
   );
 }
