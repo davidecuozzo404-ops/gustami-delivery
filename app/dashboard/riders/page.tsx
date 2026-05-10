@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
+
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,6 +25,19 @@ type Order = {
 
 export default function RiderPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const router = useRouter();
+
+useEffect(() => {
+  checkRider();
+}, []);
+
+async function checkRider() {
+  const { data } = await supabase.auth.getUser();
+
+  if (!data.user) {
+    router.push("/rider-login");
+  }
+}
 
   useEffect(() => {
     loadOrders();
@@ -77,12 +92,23 @@ export default function RiderPage() {
 
     loadOrders();
   }
+  async function logoutRider() {
+    await supabase.auth.signOut();
+    router.push("/rider-login");
+  }
 
   return (
     <main className="min-h-screen bg-black text-white p-10">
       <h1 className="text-6xl font-bold mb-2">
         Dashboard Rider
       </h1>
+      
+      <button
+  onClick={logoutRider}
+  className="mb-8 bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
+>
+  Logout Rider
+</button>
 
       <p className="text-zinc-400 mb-10">
         Gestione consegne Gustami Delivery
