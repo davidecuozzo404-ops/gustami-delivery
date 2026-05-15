@@ -2,276 +2,192 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type Product = {
+type Driver = {
   id: number;
   name: string;
-  price: number;
+  phone?: string | null;
+  email: string;
+  status?: string | null;
+  user_id?: string | null;
 };
 
-type CartItem = Product & {
+type OrderItem = {
+  id?: number;
+  name: string;
+  price: number;
   quantity: number;
 };
 
-type CurrentOrder = {
+type Order = {
   id: string;
+  customer_name: string | null;
+  customer_email: string | null;
+  total: number;
   status: string;
+  driver_id: number | null;
+  assigned_at: string | null;
+  created_at: string;
+  items: OrderItem[];
 };
 
-export default function Home() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [currentOrder, setCurrentOrder] = useState<CurrentOrder | null>(null);
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [sendingOrder, setSendingOrder] = useState(false);
+export default function DashboardPage() {
+  const router = useRouter();
+
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadProducts();
-    restoreCurrentOrder();
+    checkAdminAndLoadData();
 
-    const productsChannel = supabase
-      .channel("products-live")
+    const channel = supabase
+      .channel("restaurant-orders-realtime")
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "products",
+          table: "orders",
         },
-        () => {
-          loadProducts();
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            playBeep();
+          }
+
+          loadOrders();
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(productsChannel);
+      supabase.removeChannel(channel);
     };
   }, []);
 
-  useEffect(() => {
-    if (!currentOrder?.id) return;
+  async function checkAdminAndLoadData() {
+    const { data } = await supabase.auth.getUser();
 
-    loadCurrentOrder(currentOrder.id);
+    if (!data.user) {
+      router.push("/login");
+      return;
+    }
 
-    const orderChannel = supabase
-      .channel(`customer-order-${currentOrder.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "orders",
-          filter: `id=eq.${currentOrder.id}`,
-        },
-        (payload) => {
-          const updatedOrder = payload.new as CurrentOrder;
+    if (data.user.email !== "admin@gustami.it") {
+      await supabase.auth.signOut();
+      router.push("/login");
+      return;
+    }
 
-          const nextOrder = {
-            id: updatedOrder.id,
-            status: updatedOrder.status,
-          };
+    await Promise.all([loadOrders(), loadDrivers()]);
 
-          setCurrentOrder(nextOrder);
+    setLoading(false);
+  }
 
-          localStorage.setItem(
-            "gustami_current_order",
-            JSON.stringify(nextOrder)
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(orderChannel);
-    };
-  }, [currentOrder?.id]);
-
-  async function loadProducts() {
-    setLoadingProducts(true);
-
+  async function loadOrders() {
     const { data, error } = await supabase
-      .from("products")
-      .select("id, name, price")
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      alert("Errore caricamento ordini");
+      return;
+    }
+
+    setOrders((data || []) as Order[]);
+  }
+
+  async function loadDrivers() {
+    const { data, error } = await supabase
+      .from("drivers")
+      .select("*")
       .order("id", { ascending: true });
 
     if (error) {
       console.error(error);
-      alert("Errore caricamento prodotti");
-      setLoadingProducts(false);
+      alert("Errore caricamento rider");
       return;
     }
 
-    setProducts(data || []);
-    setLoadingProducts(false);
+    setDrivers((data || []) as Driver[]);
   }
 
-  async function loadCurrentOrder(orderId: string) {
-    const { data, error } = await supabase
+  async function updateStatus(orderId: string, status: string) {
+    const { error } = await supabase
       .from("orders")
-      .select("id, status")
-      .eq("id", orderId)
-      .maybeSingle();
+      .update({ status })
+      .eq("id", orderId);
 
     if (error) {
       console.error(error);
+      alert("Errore aggiornamento stato");
       return;
     }
 
-    if (data) {
-      const nextOrder = {
-        id: data.id,
-        status: data.status,
-      };
-
-      setCurrentOrder(nextOrder);
-
-      localStorage.setItem(
-        "gustami_current_order",
-        JSON.stringify(nextOrder)
-      );
-    }
+    await loadOrders();
   }
 
-  function restoreCurrentOrder() {
-    const savedOrder = localStorage.getItem("gustami_current_order");
-
-    if (!savedOrder) return;
-
-    try {
-      const parsedOrder = JSON.parse(savedOrder) as CurrentOrder;
-
-      if (parsedOrder?.id) {
-        setCurrentOrder(parsedOrder);
-      }
-    } catch {
-      localStorage.removeItem("gustami_current_order");
-    }
-  }
-
-  function addToCart(product: Product) {
-    const existingItem = cart.find((item) => item.id === product.id);
-
-    if (existingItem) {
-      setCart(
-        cart.map((item) =>
-          item.id === product.id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-              }
-            : item
-        )
-      );
-    } else {
-      setCart([
-        ...cart,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ]);
-    }
-  }
-
-  function increaseQuantity(productId: number) {
-    setCart(
-      cart.map((item) =>
-        item.id === productId
-          ? {
-              ...item,
-              quantity: item.quantity + 1,
-            }
-          : item
-      )
-    );
-  }
-
-  function decreaseQuantity(productId: number) {
-    setCart(
-      cart
-        .map((item) =>
-          item.id === productId
-            ? {
-                ...item,
-                quantity: item.quantity - 1,
-              }
-            : item
-        )
-        .filter((item) => item.quantity > 0)
-    );
-  }
-
-  function clearCurrentOrder() {
-    localStorage.removeItem("gustami_current_order");
-    setCurrentOrder(null);
-  }
-
-  const total = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
-
-  async function confirmOrder() {
-    if (cart.length === 0) {
-      alert("Il carrello è vuoto");
-      return;
-    }
-
-    if (!customerName.trim()) {
-      alert("Inserisci il nome cliente");
-      return;
-    }
-
-    if (!customerEmail.trim()) {
-      alert("Inserisci l'email cliente");
-      return;
-    }
-
-    setSendingOrder(true);
-
-    const { data, error } = await supabase
+  async function assignDriver(orderId: string, driverId: number) {
+    const { error } = await supabase
       .from("orders")
-      .insert({
-        customer_name: customerName,
-        customer_email: customerEmail,
-        items: cart,
-        total: total,
-        status: "pending",
+      .update({
+        driver_id: driverId,
+        assigned_at: new Date().toISOString(),
+        status: "assegnato al rider",
       })
-      .select("id, status")
-      .single();
-
-    setSendingOrder(false);
+      .eq("id", orderId);
 
     if (error) {
       console.error(error);
-      alert("Errore invio ordine");
+      alert("Errore assegnazione rider");
       return;
     }
 
-    const nextOrder = {
-      id: data.id,
-      status: data.status,
-    };
+    alert("Rider assegnato correttamente");
 
-    setCurrentOrder(nextOrder);
+    await loadOrders();
+  }
 
-    localStorage.setItem(
-      "gustami_current_order",
-      JSON.stringify(nextOrder)
-    );
+  async function deleteOrder(orderId: string) {
+    const confirmed = confirm("Vuoi davvero cancellare questo ordine?");
 
-    setCart([]);
+    if (!confirmed) return;
 
-    alert("Ordine inviato con successo!");
+    const { error } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId);
+
+    if (error) {
+      console.error(error);
+      alert("Errore cancellazione ordine");
+      return;
+    }
+
+    await loadOrders();
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
+  function getDriverName(driverId: number | null) {
+    if (!driverId) return "Nessun rider assegnato";
+
+    const driver = drivers.find((driver) => driver.id === driverId);
+
+    if (!driver) return "Rider non trovato";
+
+    return driver.name;
   }
 
   function statusLabel(status: string) {
@@ -304,201 +220,251 @@ export default function Home() {
     return "text-zinc-300";
   }
 
+  function playBeep() {
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = 900;
+    oscillator.type = "sine";
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(
+      0.01,
+      audioContext.currentTime + 0.4
+    );
+
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.4);
+  }
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+        <p className="text-zinc-400">Caricamento dashboard...</p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
       <header className="mb-10">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-5xl md:text-6xl font-bold mb-2">
-              GUSTAMI DELIVERY
-            </h1>
+        <h1 className="text-5xl md:text-6xl font-bold mb-2">
+          Dashboard Ristorante
+        </h1>
 
-            <p className="text-zinc-400">
-              Piattaforma delivery indipendente
-            </p>
-          </div>
+        <p className="text-zinc-400 mb-6">
+          Gestione ordini Gustami Delivery
+        </p>
 
-          <div className="flex flex-wrap gap-3">
-            <a
-              href="/tracking"
-              className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
-            >
-              Tracking Rider
-            </a>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={logout}
+            className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
+          >
+            Logout
+          </button>
 
-            <a
-              href="/login"
-              className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
-            >
-              Admin
-            </a>
+          <button
+            onClick={playBeep}
+            className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl font-bold"
+          >
+            Test suono
+          </button>
 
-            <a
-              href="/rider-login"
-              className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
-            >
-              Rider
-            </a>
-          </div>
+          <a
+            href="/"
+            className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
+          >
+            Home cliente
+          </a>
+
+          <a
+            href="/dashboard/riders"
+            className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
+          >
+            Dashboard rider
+          </a>
         </div>
       </header>
 
-      {currentOrder && (
-        <section className="mb-10 bg-green-950/40 border border-green-500 p-6 rounded-3xl">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-3xl font-bold mb-2">
-                Stato ordine
-              </h2>
-
-              <p
-                className={`text-2xl font-bold ${statusColor(
-                  currentOrder.status
-                )}`}
-              >
-                {statusLabel(currentOrder.status)}
-              </p>
-
-              <p className="text-zinc-400 mt-2 break-all">
-                Ordine #{currentOrder.id}
-              </p>
-            </div>
-
-            <button
-              onClick={clearCurrentOrder}
-              className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-xl font-bold"
-            >
-              Nuovo ordine
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className="mb-10">
-        <h2 className="text-3xl font-bold mb-6">
-          Menu
+      <section className="mb-10 bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
+        <h2 className="text-3xl font-bold mb-4">
+          Rider disponibili
         </h2>
 
-        {loadingProducts ? (
-          <div className="bg-zinc-900 p-6 rounded-3xl">
-            <p className="text-zinc-400">
-              Caricamento prodotti...
-            </p>
-          </div>
-        ) : products.length === 0 ? (
-          <div className="bg-zinc-900 p-6 rounded-3xl">
-            <p className="text-zinc-400">
-              Nessun prodotto disponibile
-            </p>
-          </div>
+        {drivers.length === 0 ? (
+          <p className="text-zinc-400">
+            Nessun rider presente
+          </p>
         ) : (
-          <div className="space-y-6">
-            {products.map((product) => (
+          <div className="space-y-3">
+            {drivers.map((driver) => (
               <div
-                key={product.id}
-                className="bg-zinc-900 p-6 rounded-3xl flex items-center justify-between border border-zinc-800"
+                key={driver.id}
+                className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between border-b border-zinc-800 pb-3"
               >
                 <div>
-                  <h3 className="text-3xl font-bold">
-                    {product.name}
-                  </h3>
-
-                  <p className="text-zinc-400">
-                    €{product.price}
+                  <p className="font-bold">
+                    {driver.name}
                   </p>
+
+                  <p className="text-zinc-400 text-sm">
+                    {driver.email}
+                  </p>
+
+                  {driver.phone && (
+                    <p className="text-zinc-500 text-sm">
+                      {driver.phone}
+                    </p>
+                  )}
                 </div>
 
-                <button
-                  onClick={() => addToCart(product)}
-                  className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded-2xl font-bold"
-                >
-                  Aggiungi
-                </button>
+                <span className="text-green-400 font-bold">
+                  {driver.status || "offline"}
+                </span>
               </div>
             ))}
           </div>
         )}
       </section>
 
-      <section className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
-        <h2 className="text-3xl font-bold mb-4">
-          Carrello
+      <section className="space-y-6">
+        <h2 className="text-3xl font-bold">
+          Ordini
         </h2>
 
-        <div className="grid gap-4 mb-6 md:grid-cols-2">
-          <input
-            type="text"
-            placeholder="Nome cliente"
-            className="w-full p-4 rounded-xl bg-black border border-zinc-700 text-white"
-            value={customerName}
-            onChange={(event) => setCustomerName(event.target.value)}
-          />
-
-          <input
-            type="email"
-            placeholder="Email cliente"
-            className="w-full p-4 rounded-xl bg-black border border-zinc-700 text-white"
-            value={customerEmail}
-            onChange={(event) => setCustomerEmail(event.target.value)}
-          />
-        </div>
-
-        {cart.length === 0 ? (
-          <p className="text-zinc-400">
-            Carrello vuoto
-          </p>
+        {orders.length === 0 ? (
+          <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
+            <p className="text-zinc-400">
+              Nessun ordine presente
+            </p>
+          </div>
         ) : (
-          <div className="space-y-4">
-            {cart.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between border-b border-zinc-800 pb-4"
-              >
+          orders.map((order) => (
+            <article
+              key={order.id}
+              className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800"
+            >
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-6">
                 <div>
-                  <p className="font-bold">
-                    {item.name}
+                  <h3 className="text-2xl font-bold break-all">
+                    Ordine #{order.id}
+                  </h3>
+
+                  <p className="text-zinc-400 mt-2">
+                    Cliente: {order.customer_name || "Cliente"}
                   </p>
 
-                  <p className="text-zinc-400">
-                    €{item.price} x {item.quantity}
+                  <p className="text-zinc-500 text-sm">
+                    {order.customer_email || "Email non disponibile"}
+                  </p>
+
+                  <p className="text-purple-400 mt-3 font-bold">
+                    Rider: {getDriverName(order.driver_id)}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => decreaseQuantity(item.id)}
-                    className="bg-zinc-700 hover:bg-zinc-600 w-10 h-10 rounded-xl text-xl"
-                  >
-                    -
-                  </button>
+                <div className="md:text-right">
+                  <p className="text-3xl font-bold">
+                    €{order.total}
+                  </p>
 
-                  <span className="text-xl font-bold">
-                    {item.quantity}
-                  </span>
-
-                  <button
-                    onClick={() => increaseQuantity(item.id)}
-                    className="bg-green-500 hover:bg-green-600 w-10 h-10 rounded-xl text-xl"
-                  >
-                    +
-                  </button>
+                  <p className={`font-bold capitalize ${statusColor(order.status)}`}>
+                    {statusLabel(order.status)}
+                  </p>
                 </div>
               </div>
-            ))}
 
-            <div className="pt-4 flex justify-between text-2xl font-bold">
-              <span>Totale</span>
-              <span>€{total}</span>
-            </div>
+              <div className="space-y-2 mb-6">
+                {order.items?.map((item, index) => (
+                  <div
+                    key={index}
+                    className="flex justify-between text-zinc-300 border-b border-zinc-800 pb-2"
+                  >
+                    <span>
+                      {item.name} x {item.quantity || 1}
+                    </span>
 
-            <button
-              onClick={confirmOrder}
-              disabled={sendingOrder}
-              className="mt-6 w-full bg-green-500 hover:bg-green-600 disabled:bg-zinc-700 disabled:cursor-not-allowed py-4 rounded-2xl text-xl font-bold"
-            >
-              {sendingOrder ? "Invio ordine..." : "Conferma Ordine"}
-            </button>
-          </div>
+                    <span>
+                      €{item.price * (item.quantity || 1)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mb-6">
+                <p className="font-bold mb-2">
+                  Assegna rider
+                </p>
+
+                {drivers.length === 0 ? (
+                  <p className="text-zinc-400">
+                    Nessun rider disponibile
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {drivers.map((driver) => (
+                      <button
+                        key={driver.id}
+                        onClick={() => assignDriver(order.id, driver.id)}
+                        className="bg-purple-500 hover:bg-purple-600 px-4 py-2 rounded-xl font-bold"
+                      >
+                        Assegna {driver.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => updateStatus(order.id, "accettato")}
+                  className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  Accetta ordine
+                </button>
+
+                <button
+                  onClick={() => updateStatus(order.id, "in preparazione")}
+                  className="bg-yellow-500 hover:bg-yellow-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  In preparazione
+                </button>
+
+                <button
+                  onClick={() => updateStatus(order.id, "in consegna")}
+                  className="bg-purple-500 hover:bg-purple-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  In consegna
+                </button>
+
+                <button
+                  onClick={() => updateStatus(order.id, "completato")}
+                  className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  Completato
+                </button>
+
+                <button
+                  onClick={() => updateStatus(order.id, "annullato")}
+                  className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  Annulla
+                </button>
+
+                <button
+                  onClick={() => deleteOrder(order.id)}
+                  className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl font-bold"
+                >
+                  Cancella ordine
+                </button>
+              </div>
+            </article>
+          ))
         )}
       </section>
     </main>
