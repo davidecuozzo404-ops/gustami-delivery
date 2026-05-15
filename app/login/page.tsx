@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,30 +10,30 @@ const supabase = createClient(
 );
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const router = useRouter();
+
+  const [email, setEmail] = useState("admin@gustami.it");
   const [password, setPassword] = useState("");
 
-  const login = async () => {
+  async function login() {
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      alert("Email o password errati");
       console.error(error);
+      alert("Login admin non riuscito");
       return;
     }
 
-    window.location.href = "/dashboard";
-  };
+    router.push("/dashboard");
+  }
 
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <div className="bg-zinc-900 p-8 rounded-3xl w-full max-w-md">
-        <h1 className="text-4xl font-bold mb-2">
-          Login Admin
-        </h1>
+      <div className="bg-zinc-900 p-8 rounded-3xl w-full max-w-md border border-zinc-800">
+        <h1 className="text-4xl font-bold mb-2">Login Admin</h1>
 
         <p className="text-zinc-400 mb-8">
           Accedi alla dashboard ristorante
@@ -59,7 +60,7 @@ export default function LoginPage() {
             onClick={login}
             className="w-full bg-green-500 hover:bg-green-600 py-4 rounded-xl font-bold"
           >
-            Entra
+            Entra come Admin
           </button>
         </div>
       </div>

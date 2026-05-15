@@ -15,6 +15,7 @@ type Order = {
   customer_email: string;
   total: number;
   status: string;
+  driver_id: number | null;
   items: {
     name: string;
     quantity: number;
@@ -22,16 +23,24 @@ type Order = {
   }[];
 };
 
-export default function DashboardPage() {
+type Driver = {
+  id: number;
+  name: string;
+  email: string;
+  user_id: string;
+};
+
+export default function RiderPage() {
   const router = useRouter();
+
   const [orders, setOrders] = useState<Order[]>([]);
+  const [driver, setDriver] = useState<Driver | null>(null);
 
   useEffect(() => {
-    checkUser();
-    loadOrders();
+    checkRiderAndLoadOrders();
 
     const channel = supabase
-      .channel("orders-realtime-channel")
+      .channel("rider-assigned-orders-realtime")
       .on(
         "postgres_changes",
         {
@@ -40,7 +49,8 @@ export default function DashboardPage() {
           table: "orders",
         },
         () => {
-          loadOrders();
+          playBeep();
+          checkRiderAndLoadOrders();
         }
       )
       .subscribe();
@@ -50,27 +60,42 @@ export default function DashboardPage() {
     };
   }, []);
 
-  async function checkUser() {
-    const { data } = await supabase.auth.getUser();
+  async function checkRiderAndLoadOrders() {
+    const { data: userData } = await supabase.auth.getUser();
 
-    if (!data.user) {
-      router.push("/login");
-    }
-  }
-
-  async function loadOrders() {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("id", { ascending: false });
-
-    if (error) {
-      console.error(error);
-      alert("Errore caricamento ordini");
+    if (!userData.user) {
+      router.push("/rider-login");
       return;
     }
 
-    setOrders(data || []);
+    const { data: driverData, error: driverError } = await supabase
+      .from("drivers")
+      .select("*")
+      .eq("user_id", userData.user.id)
+      .single();
+
+    if (driverError || !driverData) {
+      console.error(driverError);
+      alert("Rider non collegato al database");
+      router.push("/rider-login");
+      return;
+    }
+
+    setDriver(driverData);
+
+    const { data: ordersData, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("driver_id", driverData.id)
+      .order("id", { ascending: false });
+
+    if (ordersError) {
+      console.error(ordersError);
+      alert("Errore caricamento ordini rider");
+      return;
+    }
+
+    setOrders(ordersData || []);
   }
 
   async function updateStatus(id: number, status: string) {
@@ -81,64 +106,83 @@ export default function DashboardPage() {
 
     if (error) {
       console.error(error);
-      alert("Errore aggiornamento stato");
+      alert("Errore aggiornamento consegna");
       return;
     }
 
-    loadOrders();
+    checkRiderAndLoadOrders();
   }
 
-  async function logout() {
+  async function logoutRider() {
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/rider-login");
   }
+
   function playBeep() {
     const audioContext = new AudioContext();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
-  
+
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
-  
+
     oscillator.frequency.value = 900;
     oscillator.type = "sine";
-  
+
     gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(
       0.01,
       audioContext.currentTime + 0.4
     );
-  
+
     oscillator.start();
     oscillator.stop(audioContext.currentTime + 0.4);
   }
+
   return (
     <main className="min-h-screen bg-black text-white p-10">
       <h1 className="text-6xl font-bold mb-2">
-        Dashboard Ristorante
+        Dashboard Rider
       </h1>
-      <button
-  onClick={logout}
-  className="mb-8 bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
->
-  Logout
-</button>
 
-<button
-  onClick={playBeep}
-  className="mb-8 ml-3 bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl font-bold"
->
-  Test suono
-</button>
+      <div className="flex gap-3 mb-8">
+        <button
+          onClick={logoutRider}
+          className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
+        >
+          Logout Rider
+        </button>
 
-      <p className="text-zinc-400 mb-10">
-        Gestione ordini Gustami Delivery
+        <button
+          onClick={playBeep}
+          className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl font-bold"
+        >
+          Test suono
+        </button>
+      </div>
+
+      <p className="text-zinc-400 mb-4">
+        Gestione consegne Gustami Delivery
       </p>
+
+      {driver && (
+        <div className="mb-10 bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+          <p className="text-zinc-400">Rider collegato</p>
+
+          <h2 className="text-2xl font-bold">
+            {driver.name}
+          </h2>
+
+          <p className="text-zinc-500">
+            {driver.email}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-6">
         {orders.length === 0 ? (
           <p className="text-zinc-400">
-            Nessun ordine presente
+            Nessuna consegna assegnata a questo rider
           </p>
         ) : (
           orders.map((order) => (
@@ -153,7 +197,7 @@ export default function DashboardPage() {
                   </h2>
 
                   <p className="text-zinc-400">
-                    {order.customer_name}
+                    Cliente: {order.customer_name}
                   </p>
 
                   <p className="text-zinc-500 text-sm">
@@ -166,7 +210,7 @@ export default function DashboardPage() {
                     €{order.total}
                   </p>
 
-                  <p className="text-green-400 capitalize">
+                  <p className="text-purple-400 capitalize">
                     {order.status}
                   </p>
                 </div>
@@ -191,17 +235,10 @@ export default function DashboardPage() {
 
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => updateStatus(order.id, "accettato")}
+                  onClick={() => updateStatus(order.id, "ritirato")}
                   className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl font-bold"
                 >
-                  Accetta ordine
-                </button>
-
-                <button
-                  onClick={() => updateStatus(order.id, "in preparazione")}
-                  className="bg-yellow-500 hover:bg-yellow-600 px-4 py-2 rounded-xl font-bold"
-                >
-                  In preparazione
+                  Ordine ritirato
                 </button>
 
                 <button
@@ -215,36 +252,8 @@ export default function DashboardPage() {
                   onClick={() => updateStatus(order.id, "completato")}
                   className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-xl font-bold"
                 >
-                  Completato
+                  Consegnato
                 </button>
-
-                <button
-  onClick={async () => {
-    const confirmed = confirm("Vuoi davvero cancellare questo ordine?");
-
-    if (!confirmed) return;
-
-    const { error } = await supabase
-      .from("orders")
-      .delete()
-      .eq("id", order.id);
-
-    if (error) {
-      console.error(error);
-      alert("Errore cancellazione ordine");
-      return;
-    }
-
-    () => {
-        const audio = new Audio("/notification.mp3");
-        audio.play().catch(() => {});
-        loadOrders();
-      }
-  }}
-  className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
->
-  Cancella ordine
-</button>
               </div>
             </div>
           ))

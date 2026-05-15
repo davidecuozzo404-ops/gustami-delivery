@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -16,6 +15,7 @@ type Order = {
   customer_email: string;
   total: number;
   status: string;
+  driver_id: number | null;
   items: {
     name: string;
     quantity: number;
@@ -23,27 +23,24 @@ type Order = {
   }[];
 };
 
+type Driver = {
+  id: number;
+  name: string;
+  email: string;
+  user_id: string;
+};
+
 export default function RiderPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
   const router = useRouter();
 
-useEffect(() => {
-  checkRider();
-}, []);
-
-async function checkRider() {
-  const { data } = await supabase.auth.getUser();
-
-  if (!data.user) {
-    router.push("/rider-login");
-  }
-}
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [driver, setDriver] = useState<Driver | null>(null);
 
   useEffect(() => {
-    loadOrders();
+    checkRiderAndLoadOrders();
 
     const channel = supabase
-      .channel("rider-orders-realtime")
+      .channel("rider-assigned-orders-realtime")
       .on(
         "postgres_changes",
         {
@@ -52,7 +49,8 @@ async function checkRider() {
           table: "orders",
         },
         () => {
-          loadOrders();
+          playBeep();
+          checkRiderAndLoadOrders();
         }
       )
       .subscribe();
@@ -62,20 +60,42 @@ async function checkRider() {
     };
   }, []);
 
-  async function loadOrders() {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .in("status", ["in consegna", "accettato", "in preparazione"])
-      .order("id", { ascending: false });
+  async function checkRiderAndLoadOrders() {
+    const { data: userData } = await supabase.auth.getUser();
 
-    if (error) {
-      console.error(error);
-      alert("Errore caricamento consegne");
+    if (!userData.user) {
+      router.push("/rider-login");
       return;
     }
 
-    setOrders(data || []);
+    const { data: driverData, error: driverError } = await supabase
+      .from("drivers")
+      .select("*")
+      .eq("user_id", userData.user.id)
+      .single();
+
+    if (driverError || !driverData) {
+      console.error(driverError);
+      alert("Rider non collegato al database");
+      router.push("/rider-login");
+      return;
+    }
+
+    setDriver(driverData);
+
+    const { data: ordersData, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("driver_id", driverData.id)
+      .order("id", { ascending: false });
+
+    if (ordersError) {
+      console.error(ordersError);
+      alert("Errore caricamento ordini rider");
+      return;
+    }
+
+    setOrders(ordersData || []);
   }
 
   async function updateStatus(id: number, status: string) {
@@ -90,11 +110,33 @@ async function checkRider() {
       return;
     }
 
-    loadOrders();
+    checkRiderAndLoadOrders();
   }
+
   async function logoutRider() {
     await supabase.auth.signOut();
     router.push("/rider-login");
+  }
+
+  function playBeep() {
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = 900;
+    oscillator.type = "sine";
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(
+      0.01,
+      audioContext.currentTime + 0.4
+    );
+
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.4);
   }
 
   return (
@@ -102,22 +144,45 @@ async function checkRider() {
       <h1 className="text-6xl font-bold mb-2">
         Dashboard Rider
       </h1>
-      
-      <button
-  onClick={logoutRider}
-  className="mb-8 bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
->
-  Logout Rider
-</button>
 
-      <p className="text-zinc-400 mb-10">
+      <div className="flex gap-3 mb-8">
+        <button
+          onClick={logoutRider}
+          className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
+        >
+          Logout Rider
+        </button>
+
+        <button
+          onClick={playBeep}
+          className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl font-bold"
+        >
+          Test suono
+        </button>
+      </div>
+
+      <p className="text-zinc-400 mb-4">
         Gestione consegne Gustami Delivery
       </p>
+
+      {driver && (
+        <div className="mb-10 bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+          <p className="text-zinc-400">Rider collegato</p>
+
+          <h2 className="text-2xl font-bold">
+            {driver.name}
+          </h2>
+
+          <p className="text-zinc-500">
+            {driver.email}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-6">
         {orders.length === 0 ? (
           <p className="text-zinc-400">
-            Nessuna consegna disponibile
+            Nessuna consegna assegnata a questo rider
           </p>
         ) : (
           orders.map((order) => (
@@ -174,6 +239,13 @@ async function checkRider() {
                   className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl font-bold"
                 >
                   Ordine ritirato
+                </button>
+
+                <button
+                  onClick={() => updateStatus(order.id, "in consegna")}
+                  className="bg-purple-500 hover:bg-purple-600 px-4 py-2 rounded-xl font-bold"
+                >
+                  In consegna
                 </button>
 
                 <button

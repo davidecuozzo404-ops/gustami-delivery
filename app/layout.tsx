@@ -51,14 +51,7 @@ export default function RootLayout({
           {`
             if ("serviceWorker" in navigator) {
               window.addEventListener("load", function () {
-                navigator.serviceWorker
-                  .register("/sw.js")
-                  .then(function () {
-                    console.log("Service Worker registrato");
-                  })
-                  .catch(function (error) {
-                    console.log("Errore Service Worker:", error);
-                  });
+                navigator.serviceWorker.register("/sw.js");
               });
             }
           `}

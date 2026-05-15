@@ -19,8 +19,8 @@ export default function RiderLoginPage() {
     });
 
     if (error) {
-      alert("Login rider non riuscito");
       console.error(error);
+      alert("Login rider non riuscito");
       return;
     }
 
@@ -30,9 +30,7 @@ export default function RiderLoginPage() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
       <div className="bg-zinc-900 p-8 rounded-3xl w-full max-w-md border border-zinc-800">
-        <h1 className="text-4xl font-bold mb-2">
-          Login Rider
-        </h1>
+        <h1 className="text-4xl font-bold mb-2">Login Rider</h1>
 
         <p className="text-zinc-400 mb-8">
           Accedi alla dashboard consegne

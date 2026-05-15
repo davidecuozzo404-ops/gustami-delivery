@@ -50,11 +50,23 @@ export default function MapPage() {
 
           setPosition([lat, lng]);
 
-          await supabase.from("driver_locations").insert({
-            driver_id: 1,
-            lat,
-            lng,
-          });
+          const { data: driver, error: driverError } = await supabase
+  .from("drivers")
+  .select("id")
+  .eq("user_id", data.user.id)
+  .single();
+
+if (driverError || !driver) {
+  console.error(driverError);
+  alert("Rider non collegato al database");
+  return;
+}
+
+await supabase.from("driver_locations").insert({
+  driver_id: driver.id,
+  lat,
+  lng,
+});
         },
         (err) => {
           console.error(err);
