@@ -265,7 +265,7 @@ export default function DashboardPage() {
             onClick={logout}
             className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl font-bold"
           >
-            Logout
+            Logout Admin
           </button>
 
           <button
@@ -373,7 +373,11 @@ export default function DashboardPage() {
                     €{order.total}
                   </p>
 
-                  <p className={`font-bold capitalize ${statusColor(order.status)}`}>
+                  <p
+                    className={`font-bold capitalize ${statusColor(
+                      order.status
+                    )}`}
+                  >
                     {statusLabel(order.status)}
                   </p>
                 </div>
